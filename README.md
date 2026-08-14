@@ -3,7 +3,7 @@ title: PGD-Diff
 emoji: 🧬
 colorFrom: blue
 colorTo: green
-sdk: gradio
+sdk: streamlit
 app_file: app.py
 python_version: "3.9"
 short_description: ACP generation with PGD-Diff
