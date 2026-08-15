@@ -5,7 +5,7 @@ colorFrom: blue
 colorTo: green
 sdk: streamlit
 app_file: app.py
-python_version: "3.9"
+python_version: "3.10"
 short_description: ACP generation with PGD-Diff
 pinned: false
 ---
