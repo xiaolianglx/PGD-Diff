@@ -38,9 +38,11 @@ The model checkpoint is:
 ```text
 data/output/pgd_diff/both_dual_encoder/last.ckpt
 
+---
+
 ## 🚀 Conditional Modes
 
-### 1. Conditional Generation
+### 2. Conditional Generation
 
 Conditional Generation produces peptide sequences without specifying a
 cancer condition.
