@@ -5,7 +5,7 @@ colorFrom: blue
 colorTo: green
 sdk: streamlit
 app_file: app.py
-python_version: "3.9"
+python_version: "3.10"
 short_description: ACP generation with PGD-Diff
 pinned: false
 ---
@@ -37,3 +37,13 @@ The model checkpoint is:
 
 ```text
 data/output/pgd_diff/both_dual_encoder/last.ckpt
+
+###2. Conditional Generation
+
+General Generation produces peptide sequences without specifying a
+cancer condition.
+
+The model checkpoint is:
+
+```text
+models/prefix_tuned/last.ckpt
