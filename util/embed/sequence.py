@@ -265,7 +265,7 @@ def get_bio_embedding_for_sequence(fasta, encode_type=None):
     embedding = np.concatenate(embedding_list, axis=1)
     
     # 期望的生物学特征维度（从模型参数 seq_n_seq_emb - 20 得来，此处设为 2052）
-    expected_bio_dim = 2052
+    expected_bio_dim = 2037
     if embedding.shape[1] != expected_bio_dim:
         print(f"警告：序列 {fasta[:30]}... 的生物学特征维度为 {embedding.shape[1]}，期望 {expected_bio_dim}")
         print(f"各特征维度: {dict(zip(encode_type, feature_dims))}")
