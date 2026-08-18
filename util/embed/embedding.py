@@ -60,8 +60,8 @@ def sequence_embedding(fasta=None, index=None):
     embedding_2 = get_bio_embedding_for_sequence(fasta)
     L = embedding_1.shape[0]
     
-    # 确保维度一致，模型期望总维度 2072
-    expected_total = 2072
+    # 确保维度一致，模型期望总维度 2057
+    expected_total = 2057
     if embedding_1.shape[1] + embedding_2.shape[1] != expected_total:
         print(f"序列 {fasta[:30]}... 总维度 {embedding_1.shape[1] + embedding_2.shape[1]} != {expected_total}")
         # 调整 embedding_2 到 (L, expected_total-20)
