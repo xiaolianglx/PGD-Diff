@@ -82,7 +82,7 @@ class PGD_Diff(pl.LightningModule):
             struct_n_layer=4,
             # parameters for sequence diffusion
             seq_n_class=20,
-            seq_n_seq_emb=2072,
+            seq_n_seq_emb=2057,
             proj_dim=256,
             seq_n_hidden=128,
             seq_clamp=-50,
