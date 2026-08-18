@@ -131,7 +131,6 @@ def load_general_model():
         return None
 
 @st.cache_resource
-@st.cache_resource
 def load_conditional_model():
     """
     加载条件生成模型（Prefix-Tuned）
@@ -226,14 +225,94 @@ def generate_conditional_peptides(model, cancer_type, length, num_sequences, can
         st.error(f"条件生成失败: {e}")
         return None
 
-def generate_sequences_fallback(cancer_type, length, num_sequences):
-    """备用生成函数：模拟生成"""
-    amino_acids = "ACDEFGHIKLMNPQRSTVWY"
-    sequences = []
-    for _ in range(num_sequences):
-        seq = "".join(random.choices(list(amino_acids), k=length))
-        sequences.append(seq)
-    return sequences
+
+# ================= 理化性质计算工具 =================
+def calculate_peptide_properties(sequence):
+    """
+    计算肽段的理化性质
+    返回字典：长度、分子量、净电荷(pH7)、平均疏水性、等电点
+    """
+    # 氨基酸分子量 (平均残基质量，单位 Da)
+    aa_masses = {
+        'A': 71.0788, 'R': 156.1875, 'N': 114.1038, 'D': 115.0886,
+        'C': 103.1388, 'E': 129.1155, 'Q': 128.1307, 'G': 57.0519,
+        'H': 137.1411, 'I': 113.1594, 'L': 113.1594, 'K': 128.1741,
+        'M': 131.1926, 'F': 147.1766, 'P': 97.1167, 'S': 87.0782,
+        'T': 101.1051, 'W': 186.2132, 'Y': 163.1760, 'V': 99.1326
+    }
+    
+    # Kyte-Doolittle 疏水性标度
+    kyte_doolittle = {
+        'A': 1.8, 'R': -4.5, 'N': -3.5, 'D': -3.5, 'C': 2.5,
+        'E': -3.5, 'Q': -3.5, 'G': -0.4, 'H': -3.2, 'I': 4.5,
+        'L': 3.8, 'K': -3.9, 'M': 1.9, 'F': 2.8, 'P': -1.6,
+        'S': -0.8, 'T': -0.7, 'W': -0.9, 'Y': -1.3, 'V': 4.2
+    }
+    
+    # 带电氨基酸 pKa (用于 pH 7.0 电荷计算)
+    # 侧链 pKa: D=3.9, E=4.3, H=6.0, C=8.3, K=10.5, R=12.5, Y=10.1
+    # N-terminus pKa=9.6, C-terminus pKa=2.3
+    seq = sequence.upper().strip()
+    
+    # 过滤非标准氨基酸
+    valid_aa = set(aa_masses.keys())
+    if not all(aa in valid_aa for aa in seq):
+        invalid = [aa for aa in seq if aa not in valid_aa]
+        return {"error": f"包含非标准氨基酸: {', '.join(set(invalid))}"}
+    
+    length = len(seq)
+    
+    # 1. 分子量 (加水分子 H2O = 18.015)
+    mass = sum(aa_masses[aa] for aa in seq) + 18.015
+    
+    # 2. 净电荷 (pH 7.0)
+    # 使用 Henderson-Hasselbalch 方程: 带电荷比例 = 1 / (1 + 10^(pH - pKa))
+    pH = 7.0
+    # 侧链带电基团
+    charge_dict = {
+        'D': (3.9, -1),  # 酸性，带负电
+        'E': (4.3, -1),
+        'H': (6.0, 1),   # 碱性，带正电
+        'C': (8.3, -1),
+        'K': (10.5, 1),
+        'R': (12.5, 1),
+        'Y': (10.1, 0),  # 酪氨酸在 pH7 基本不带电，忽略
+    }
+    net_charge = 0.0
+    # N-terminus (正电)
+    if length > 0:
+        net_charge += 1 / (1 + 10**(pH - 9.6))
+    # C-terminus (负电)
+    if length > 0:
+        net_charge -= 1 / (1 + 10**(9.6 - pH))
+    # 侧链
+    for aa in seq:
+        if aa in charge_dict:
+            pKa, val = charge_dict[aa]
+            if val == 1:
+                net_charge += 1 / (1 + 10**(pH - pKa))
+            elif val == -1:
+                net_charge -= 1 / (1 + 10**(pKa - pH))
+    
+    # 3. 平均疏水性 (Kyte-Doolittle)
+    hydrophobicity = sum(kyte_doolittle.get(aa, 0) for aa in seq) / length
+    
+    # 4. 等电点 pI (粗略估计)
+    pI = 7.0
+    if net_charge > 0.1:
+        pI = 7.0 + min(net_charge * 1.5, 4.0)
+    elif net_charge < -0.1:
+        pI = 7.0 - min(abs(net_charge) * 1.5, 4.0)
+    pI = max(3.0, min(11.0, pI))
+    
+    return {
+        "length": length,
+        "molecular_weight": mass,
+        "net_charge": net_charge,
+        "hydrophobicity": hydrophobicity,
+        "isoelectric_point": pI
+    }
+
 
 # ================= 8. 加载模型 =================
 cancer_map = load_cancer_mapping()
@@ -274,14 +353,14 @@ if page == "🎯 Broad-Spectrum Generation":
         
     if st.button("🚀 Generate Sequences"):
         with st.spinner("Generating sequences..."):
-            if general_model is not None:
-                seqs = generate_general_peptides(general_model, length, num)
-            else:
-                seqs = None
+            if general_model is None:
+                st.error("❌ 通用模型未加载，无法生成序列。请检查模型文件或重启应用。")
+                st.stop()
             
+            seqs = generate_general_peptides(general_model, length, num)
             if seqs is None:
-                st.warning("⚠️ 模型未加载，使用模拟生成")
-                seqs = generate_sequences_fallback("general", length, num)
+                st.error("❌ 生成失败，请检查模型或稍后重试。")
+                st.stop()
             
             st.success(f"Successfully generated {num} sequences!")
             st.dataframe(pd.DataFrame({"Sequence ID": range(1, num+1), "Amino Acid Sequence": seqs}))
@@ -302,16 +381,16 @@ elif page == "🎯 Cancer-Targeted Generation":
     
     if st.button("🚀 Generate Targeted Sequences"):
         with st.spinner(f"Generating sequences for {cancer_type}..."):
-            if conditional_model is not None:
-                seqs = generate_conditional_peptides(
-                    conditional_model, cancer_type, length, num, cancer_map
-                )
-            else:
-                seqs = None
+            if conditional_model is None:
+                st.error("❌ 条件模型未加载，无法生成序列。请检查模型文件或重启应用。")
+                st.stop()
             
+            seqs = generate_conditional_peptides(
+                conditional_model, cancer_type, length, num, cancer_map
+            )
             if seqs is None:
-                st.warning("⚠️ 条件模型未加载，使用模拟生成")
-                seqs = generate_sequences_fallback(cancer_type, length, num)
+                st.error("❌ 生成失败，请检查模型或稍后重试。")
+                st.stop()
             
             st.success(f"Successfully generated {num} sequences targeting {cancer_type}!")
             st.dataframe(pd.DataFrame({"Sequence ID": range(1, num+1), "Amino Acid Sequence": seqs}))
@@ -319,17 +398,159 @@ elif page == "🎯 Cancer-Targeted Generation":
 # --- 10.3 Physicochemical Visualization ---
 elif page == "📊 Physicochemical Visualization":
     st.title("📊 Physicochemical Property Visualization")
-    st.write("Input sequences to analyze key physicochemical characteristics such as net charge and hydrophobicity.")
+    st.write("Enter one or more peptide sequences (one per line). The tool will calculate and compare their properties.")
     
-    user_seq = st.text_area("Enter Amino Acid Sequence (e.g., ACDEFGHIKLMNPQRSTVWY)", "ACDEFGHIKLMNPQRSTVWY")
-    if user_seq:
-        data = {
-            "Property": ["Net Charge", "Hydrophobicity", "Molecular Weight (Da)", "Isoelectric Point (pI)"],
-            "Value": [2.5, -1.2, 1850.4, 8.6]
-        }
-        df = pd.DataFrame(data)
-        fig = px.bar(df, x="Property", y="Value", title="Sequence Physicochemical Properties", color="Property")
-        st.plotly_chart(fig, use_container_width=True)
+    user_seq = st.text_area(
+        "Enter Amino Acid Sequences (one per line, e.g., ACDEFGHIKLMNPQRSTVWY)",
+        "ACDEFGHIKLMNPQRSTVWY\nKALGGGGIKVK",
+        height=200
+    )
+    
+    if st.button("🔬 Analyze Sequences", type="primary"):
+        # 解析输入：按行分割，去除空行
+        lines = [line.strip() for line in user_seq.splitlines() if line.strip()]
+        if not lines:
+            st.warning("Please enter at least one peptide sequence.")
+        else:
+            # 对每条序列进行计算
+            results = []
+            error_seqs = []
+            for seq in lines:
+                result = calculate_peptide_properties(seq)
+                if "error" in result:
+                    error_seqs.append((seq, result["error"]))
+                else:
+                    # 保存原始序列和计算结果
+                    result["sequence"] = seq
+                    results.append(result)
+            
+            if not results:
+                st.error("No valid sequences to analyze. Please check your input.")
+                if error_seqs:
+                    with st.expander("Show errors"):
+                        for seq, err in error_seqs:
+                            st.write(f"❌ {seq} → {err}")
+                st.stop()
+            
+            # 如果有错误，显示警告
+            if error_seqs:
+                st.warning(f"⚠️ {len(error_seqs)} sequence(s) contained non-standard amino acids and were skipped.")
+                with st.expander("Show skipped sequences"):
+                    for seq, err in error_seqs:
+                        st.write(f"❌ {seq} → {err}")
+            
+            # 构建 DataFrame（每条肽一行）
+            df_prop = pd.DataFrame([
+                {
+                    "Sequence": r["sequence"][:30] + "..." if len(r["sequence"]) > 30 else r["sequence"],
+                    "Length": r["length"],
+                    "Mol. Weight (Da)": round(r["molecular_weight"], 2),
+                    "Net Charge (pH 7)": round(r["net_charge"], 3),
+                    "Avg Hydrophobicity": round(r["hydrophobicity"], 3),
+                    "pI": round(r["isoelectric_point"], 2)
+                }
+                for r in results
+            ])
+            
+            # 1. 显示表格
+            st.subheader("📊 Property Summary")
+            st.dataframe(df_prop, use_container_width=True, hide_index=True)
+            
+            # 2. 雷达图（多条肽，每条一条轨迹）
+            if len(results) > 1:
+                st.subheader("📈 Multi-Peptide Radar Chart")
+                # 准备雷达图数据：归一化值
+                radar_rows = []
+                for i, r in enumerate(results):
+                    radar_rows.append({
+                        "Peptide": f"Peptide {i+1}",
+                        "Property": "Mol. Weight",
+                        "Value": r["molecular_weight"] / 5000
+                    })
+                    radar_rows.append({
+                        "Peptide": f"Peptide {i+1}",
+                        "Property": "Net Charge",
+                        "Value": (r["net_charge"] + 5) / 10
+                    })
+                    radar_rows.append({
+                        "Peptide": f"Peptide {i+1}",
+                        "Property": "Hydrophobicity",
+                        "Value": (r["hydrophobicity"] + 5) / 10
+                    })
+                    radar_rows.append({
+                        "Peptide": f"Peptide {i+1}",
+                        "Property": "pI",
+                        "Value": r["isoelectric_point"] / 14
+                    })
+                df_radar = pd.DataFrame(radar_rows)
+                
+                fig_radar = px.line_polar(
+                    df_radar,
+                    r="Value",
+                    theta="Property",
+                    line_close=True,
+                    color="Peptide",
+                    title="Normalized Property Comparison",
+                    color_discrete_sequence=px.colors.qualitative.Set2
+                )
+                fig_radar.update_traces(fill="toself", opacity=0.2)
+                st.plotly_chart(fig_radar, use_container_width=True)
+            else:
+                # 只有一条肽时，显示单条雷达图（与原一致）
+                st.subheader("📈 Property Radar Chart")
+                r = results[0]
+                radar_data = {
+                    "Property": ["Mol. Weight", "Net Charge", "Hydrophobicity", "pI"],
+                    "Value": [
+                        r["molecular_weight"] / 5000,
+                        (r["net_charge"] + 5) / 10,
+                        (r["hydrophobicity"] + 5) / 10,
+                        r["isoelectric_point"] / 14
+                    ]
+                }
+                df_radar_single = pd.DataFrame(radar_data)
+                fig_radar_single = px.line_polar(
+                    df_radar_single,
+                    r="Value",
+                    theta="Property",
+                    line_close=True,
+                    title="Normalized Property Radar Chart",
+                    color_discrete_sequence=["#4A90E2"]
+                )
+                fig_radar_single.update_traces(fill="toself", opacity=0.3)
+                st.plotly_chart(fig_radar_single, use_container_width=True)
+            
+            # 3. 全局氨基酸组成（所有肽汇总）
+            st.subheader("🧬 Overall Amino Acid Composition")
+            all_seq = "".join(r["sequence"].upper() for r in results)
+            aa_counts = pd.Series(list(all_seq)).value_counts()
+            df_aa = pd.DataFrame({
+                "Amino Acid": aa_counts.index,
+                "Count": aa_counts.values,
+                "Percentage": (aa_counts.values / len(all_seq) * 100).round(1)
+            })
+            st.dataframe(df_aa, use_container_width=True, hide_index=True)
+            
+            fig_pie = px.pie(
+                df_aa,
+                values="Count",
+                names="Amino Acid",
+                title="Overall Amino Acid Composition",
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_pie.update_traces(textposition="inside", textinfo="percent+label")
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # 4. 说明
+            with st.expander("📖 About These Properties"):
+                st.markdown("""
+                - **Molecular Weight**: Calculated from amino acid residue masses + H₂O
+                - **Net Charge**: Estimated at pH 7.0 using side-chain pKa values
+                - **Avg Hydrophobicity**: Kyte-Doolittle scale averaged over sequence
+                - **Isoelectric Point (pI)**: Approximate pH where net charge is zero
+                - **Radar Chart**: Normalized values for visual comparison (scaled to 0-1 range)
+                - For multi-peptide input, each peptide appears as a separate curve in the radar chart.
+                """)
 
 # --- 10.4 About Model ---
 elif page == "📖 About Model":
@@ -349,7 +570,7 @@ elif page == "📖 About Model":
     image_path = PROJECT_ROOT / "images" / "Figure 1.tif"
     try:
         if image_path.exists():
-            st.image(str(image_path), caption="Figure 1: Architecture of the PGD-Diff Framework", width=800)
+            st.image(str(image_path), caption="Architecture of the PGD-Diff Framework", width=800)
         else:
             st.warning(f"Image not found at: {image_path}")
     except Exception as e:
@@ -369,7 +590,6 @@ elif page == "📥 Dataset Download":
     col1, col2 = st.columns(2)
     
     with col1:
-        # ACP训练集
         acp_path = PROJECT_ROOT / "data" / "source" / "fasta" / "ACP.fasta"
         if acp_path.exists():
             with open(acp_path, 'r') as f:
@@ -385,7 +605,6 @@ elif page == "📥 Dataset Download":
             st.warning("ACP.fasta not found")
     
     with col2:
-        # nonACP训练集
         nonacp_path = PROJECT_ROOT / "data" / "source" / "fasta" / "nonACP.fasta"
         if nonacp_path.exists():
             with open(nonacp_path, 'r') as f:
@@ -417,7 +636,6 @@ elif page == "📥 Dataset Download":
             mime="text/plain",
             key="general_gen"
         )
-        # 显示统计信息
         seq_count = general_data.count('>')
         st.caption(f"📊 Contains {seq_count} sequences")
     else:
@@ -429,7 +647,6 @@ elif page == "📥 Dataset Download":
     st.subheader("🎯 Cancer-Targeted Generation Datasets")
     st.write("Peptides generated for nine specific cancer types using the conditional generation model.")
     
-    # 癌症类型列表（与文件名对应）
     cancer_files = [
         ("Blood", "generated_blood_peptides.txt"),
         ("Brain", "generated_brain_peptides.txt"),
@@ -442,7 +659,6 @@ elif page == "📥 Dataset Download":
         ("Skin", "generated_skin_peptides.txt")
     ]
     
-    # 创建3列网格布局（9个文件排成3×3）
     cols = st.columns(3)
     
     for idx, (cancer_name, file_name) in enumerate(cancer_files):
@@ -452,7 +668,6 @@ elif page == "📥 Dataset Download":
             if file_path.exists():
                 with open(file_path, 'r') as f:
                     file_data = f.read()
-                # 计算序列数量
                 seq_count = len([line for line in file_data.split('\n') if line.strip()])
                 st.download_button(
                     label=f"📥 {cancer_name} Cancer",
@@ -471,7 +686,6 @@ elif page == "📥 Dataset Download":
     st.subheader("📦 Download All Datasets")
     st.write("Download all generated datasets as a single ZIP archive (if available).")
     
-    # 如果有ZIP打包文件，可以添加下载按钮
     zip_path = PROJECT_ROOT / "data" / "output" / "fasta" / "all_generated_datasets.zip"
     if zip_path.exists():
         with open(zip_path, 'rb') as f:
@@ -491,21 +705,17 @@ elif page == "📥 Dataset Download":
 elif page == "📞 Contact Us":
     st.title("📞 Contact Us")
     
-    # 英文描述
     st.markdown("""
     **Contact the PGD-Diff team** to share suggestions for improving the platform, or to contribute newly reported anticancer peptide sequences for future database curation.
     """)
     
     st.markdown("---")
     
-    # 创建两列布局：导师和作者
     col1, col2 = st.columns(2)
     
-    # ========== 左列：导师信息 ==========
     with col1:
         st.subheader("👨‍🏫 Principal Investigator")
         
-        # 导师照片
         liang_pic = PROJECT_ROOT / "images" / "liangPic.png"
         if liang_pic.exists():
             st.image(str(liang_pic), width=150)
@@ -524,11 +734,9 @@ elif page == "📞 Contact Us":
         No.174 Shazhengjie, Shapingba, Chongqing, 400044, China
         """)
     
-    # ========== 右列：作者信息 ==========
     with col2:
         st.subheader("👨‍💻 Developer")
         
-        # 作者照片
         xiao_pic = PROJECT_ROOT / "images" / "xiaoPic.jpg"
         if xiao_pic.exists():
             st.image(str(xiao_pic), width=150)
