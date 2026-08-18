@@ -560,7 +560,7 @@ elif page == "📖 About Model":
     We propose **Prefix-Guided Dual-path Diffusion (PGD-Diff)**, a multimodal diffusion framework that integrates a dual-path encoder with conditional prefix tuning.
     
     **1. Dual-Path Sequence and Structure Encoders:**
-    For the sequence modality, we employ Transformer blocks with parallel global self-attention and local convolutions to simultaneously capture long-range residue dependencies and local motif information. For the structure modality, we design a hybrid encoder combining equivariant Graph Neural Networks (GNNs) with global Transformers.
+    For the sequence modality, we employ Transformer blocks with parallel global self-attention and local convolutions to simultaneously capture long-range residue dependencies and local motif information. For the structure modality, we design a hybrid encoder combining equivariant Graph Neural Networks (EGNN) with global Transformers.
     
     **2. Prefix-Guided Conditional Generation:**
     Building upon a pre-trained multimodal diffusion model, we introduce cancer type as conditional information. A lightweight prefix-tuning module injects type embeddings into the sequence denoising process, enabling cancer-type-specific ACP generation.
